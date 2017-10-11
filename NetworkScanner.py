@@ -1,6 +1,7 @@
 from platform import system as sys_name
 from subprocess import DEVNULL
 from AsyncScanProtocol import AsyncScanProtocol
+from ipaddress import ip_address
 import asyncio
 
 
@@ -19,6 +20,8 @@ class NetworkScanner:
         runs all tasks on the self.pending tasks queue
         :return: a copy of self.pending_tasks to the user, these should have a task.result() value
         """
+        if not task_args:
+            raise ValueError("empty task_args")
         current_tasks = [task_function(*args) for args in task_args]
         return await asyncio.wait(current_tasks)
 
@@ -39,7 +42,8 @@ class NetworkScanner:
 
     def ping_sweep(self, packet_count=2, ttl=1000):
         args_tups = [(ip, packet_count, ttl) for ip in self.network]
-        return self.asyncloop.run_until_complete(self._run_tasks(self._ping_host_async, args_tups))
+        completed_tasks = self.asyncloop.run_until_complete(self._run_tasks(self._ping_host_async, args_tups))
+        return [done_task.result()[1] for done_task in completed_tasks[0] if done_task.result()[0]==0]
 
     async def _tcp_scan_async(self, host_ip, port, timeout=3):
         trans, _ = None, None
@@ -55,9 +59,8 @@ class NetworkScanner:
                 trans.close()
             return trans
 
-    def tcp_sweep(self, ip_network=[], ports=[21, 22, 23, 25, 53, 443, 110, 135, 137, 138, 139, 1433]):
-        if ip_network:
-            ip_network = self.network
-        args_tup = [(ip_addr,port) for ip_addr in ip_network for port in ports]
+    def tcp_sweep(self, ports=[21, 22, 23, 25, 53, 443, 110, 135, 137, 138, 139, 1433]):
+        args_tup = [(ip_addr,port) for ip_addr in self.network.hosts() for port in ports]
         results = self.asyncloop.run_until_complete(self._run_tasks(self._tcp_scan_async, args_tup))
-        return [task.result().get_extra_info('peername') for task in results[0] if task.result()]
+        ip_port_tuples = [task.result().get_extra_info('peername') for task in results[0] if task.result()]
+        return list(map(lambda x : (ip_address(x[0]),x[1]),ip_port_tuples))
